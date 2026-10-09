@@ -10,6 +10,7 @@ defmodule Goatbot.Face do
   | turning right          | `O.o` |
   | turning left           | `o.O` |
   | fallen                 | `x_x` |
+  | lifted                 | `^.^` |
   | disarmed or idle       | `-_-` |
 
   Motion is measured, not commanded, so a robot drifting on its own pulls a
@@ -113,6 +114,7 @@ defmodule Goatbot.Face do
   end
 
   def face(:fallen, _forward, _left), do: "x_x"
+  def face(:lifted, _forward, _left), do: "^.^"
   def face(_mode, _forward, _left), do: "-_-"
 
   @impl BB.Controller

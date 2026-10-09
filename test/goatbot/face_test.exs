@@ -28,6 +28,7 @@ defmodule Goatbot.FaceTest do
 
   test "not balancing ignores motion" do
     assert face(:fallen, 3.0, 0.0) == "x_x"
+    assert face(:lifted, 3.0, 0.0) == "^.^"
     assert face(:disarmed, 3.0, 0.0) == "-_-"
     assert face(:idle, 0.0, 3.0) == "-_-"
   end

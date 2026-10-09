@@ -10,7 +10,7 @@ defmodule Goatbot.Dashboard do
   | Key | Does |
   | --- | --- |
   | `a` | arm |
-  | `s` | stand: hand the robot to the balancer (from idle or fallen) |
+  | `s` | stand: hand the robot to the balancer (from idle, fallen or lifted) |
   | `d` | disarm |
   | `e` | explore on / off (while balancing), see `Goatbot.Explore` |
   | `↑` / `↓` | hold to drive forward / back; let go to stop |
@@ -411,6 +411,9 @@ defmodule Goatbot.Dashboard do
   defp banner(%{state: :balancing}),
     do: "BALANCING · hold arrows to drive and turn · e explore · d disarm"
 
+  defp banner(%{state: :lifted}),
+    do: "LIFTED · wheels braked · put it down, hold it still, then s"
+
   defp banner(%{state: :fallen}),
     do: "FALLEN · wheels braked · stand it up, hold it still, then s"
 
@@ -420,6 +423,7 @@ defmodule Goatbot.Dashboard do
   defp banner(%{state: state}), do: to_string(state)
 
   defp banner_class(%{state: :fallen}), do: "bg-error text-bg font-bold"
+  defp banner_class(%{state: :lifted}), do: "bg-warning text-bg font-bold"
   defp banner_class(%{state: :error}), do: "bg-error text-bg font-bold"
   defp banner_class(%{state: :balancing}), do: "bg-panel text-success"
 
@@ -432,6 +436,7 @@ defmodule Goatbot.Dashboard do
 
   defp state_color(:balancing), do: "success"
   defp state_color(:fallen), do: "error"
+  defp state_color(:lifted), do: "warning"
   defp state_color(:error), do: "error"
   defp state_color(:idle), do: "warning"
   defp state_color(:executing), do: "warning"

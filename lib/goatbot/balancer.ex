@@ -13,6 +13,15 @@ defmodule Goatbot.Balancer do
   upright, then run `Goatbot.Robot.stand/0` to hand it over. If the lean error
   passes `fall_angle`, it brakes the wheels and runs `Goatbot.Robot.fall/0`.
 
+  ## Lifted
+
+  Picked up, the wheels can't move the body, so the lean error never shrinks
+  and the integral winds the wheels up to full speed, all while the robot is
+  far too upright to have fallen. On the floor the command stays well clear of
+  that: driving at 0.2 m/s is about 9 rad/s, and balancing peaks around 11. So
+  a command held above `lift_command` for `lift_time` seconds means the robot
+  is in the air: it brakes the wheels and runs `Goatbot.Robot.lift/0`.
+
   ## Why the integral is large
 
   The wheels behave like a speed servo: torque goes with the command minus the
@@ -67,6 +76,16 @@ defmodule Goatbot.Balancer do
         required: true,
         doc: "Lean error past which it gives up"
       ],
+      lift_command: [
+        type: :float,
+        default: 25.0,
+        doc: "Wheel rad/s which, held for `lift_time`, means the robot has been picked up"
+      ],
+      lift_time: [
+        type: :float,
+        default: 0.3,
+        doc: "Seconds above `lift_command` before it counts as lifted"
+      ],
       max_wheel_speed: [
         type: :float,
         default: 31.4,
@@ -116,7 +135,8 @@ defmodule Goatbot.Balancer do
       offset_at: nil,
       differential: 0.0,
       differential_at: nil,
-      target: nil
+      target: nil,
+      over_since: nil
     }
 
     {:ok, configure(opts, state)}
@@ -145,7 +165,8 @@ defmodule Goatbot.Balancer do
          offset_at: nil,
          differential: 0.0,
          differential_at: nil,
-         target: nil
+         target: nil,
+         over_since: nil
      }}
   end
 
@@ -183,18 +204,35 @@ defmodule Goatbot.Balancer do
       # The gyro's rate rather than a differentiated error: it's measured
       # directly, so it's far less noisy.
       command = state.kp * error + state.ki * integral + state.kd * rate
+      over_since = over_since(state, command, now)
 
-      # Leaning forward is positive, and the fix is to drive forward under it,
-      # so both wheels take the command's sign; turning runs one faster than the
-      # other, with whatever headroom balancing leaves.
-      headroom = max(state.max_wheel_speed - abs(command), 0.0)
-      differential = current_differential(state, now) |> max(-headroom) |> min(headroom)
-
-      BB.Actuator.set_velocity(state.robot, state.left_wheel, command + differential)
-      BB.Actuator.set_velocity(state.robot, state.right_wheel, command - differential)
-
-      %{state | integral: integral, last: now, last_command: command, target: target}
+      if over_since && now - over_since >= state.lift_time * 1_000_000_000 do
+        lift(state)
+      else
+        drive(%{state | over_since: over_since}, command, integral, target, now)
+      end
     end
+  end
+
+  defp over_since(state, command, now) do
+    cond do
+      abs(command) <= state.lift_command -> nil
+      state.over_since -> state.over_since
+      true -> now
+    end
+  end
+
+  defp drive(state, command, integral, target, now) do
+    # Leaning forward is positive, and the fix is to drive forward under it, so
+    # both wheels take the command's sign; turning runs one faster than the
+    # other, with whatever headroom balancing leaves.
+    headroom = max(state.max_wheel_speed - abs(command), 0.0)
+    differential = current_differential(state, now) |> max(-headroom) |> min(headroom)
+
+    BB.Actuator.set_velocity(state.robot, state.left_wheel, command + differential)
+    BB.Actuator.set_velocity(state.robot, state.right_wheel, command - differential)
+
+    %{state | integral: integral, last: now, last_command: command, target: target}
   end
 
   defp current_differential(%{differential_at: nil}, _now), do: 0.0
@@ -209,6 +247,16 @@ defmodule Goatbot.Balancer do
 
   defp current_offset(state, now) do
     if now - state.offset_at <= state.offset_timeout * 1_000_000, do: state.offset, else: 0.0
+  end
+
+  defp lift(state) do
+    BB.Actuator.hold(state.robot, state.left_wheel)
+    BB.Actuator.hold(state.robot, state.right_wheel)
+    state.robot.lift()
+
+    # Locally, as in `fall/1`, so samples arriving before the transition comes
+    # back don't spin the wheels up again.
+    %{state | mode: :lifted, last: nil, over_since: nil}
   end
 
   defp fall(state) do
@@ -231,6 +279,8 @@ defmodule Goatbot.Balancer do
       fall_angle: Units.to_radians(Keyword.fetch!(opts, :fall_angle)),
       offset_timeout: Keyword.fetch!(opts, :offset_timeout),
       max_wheel_speed: Keyword.fetch!(opts, :max_wheel_speed),
+      lift_command: Keyword.fetch!(opts, :lift_command),
+      lift_time: Keyword.fetch!(opts, :lift_time),
       left_wheel: Keyword.fetch!(opts, :left_wheel),
       right_wheel: Keyword.fetch!(opts, :right_wheel)
     })

@@ -15,7 +15,7 @@ defmodule Goatbot.Robot do
 
     command :disarm do
       handler(BB.Command.Disarm)
-      allowed_states([:idle, :balancing, :fallen])
+      allowed_states([:idle, :balancing, :fallen, :lifted])
     end
 
     # Disarmed only: taking the operating system out from under a balancing
@@ -27,7 +27,13 @@ defmodule Goatbot.Robot do
 
     command :stand do
       handler(BB.NSK.Command.Stand)
-      allowed_states([:idle, :fallen])
+      allowed_states([:idle, :fallen, :lifted])
+    end
+
+    # Issued by `Goatbot.Balancer` when the wheels run away in the air.
+    command :lift do
+      handler(Goatbot.Command.Lift)
+      allowed_states([:balancing])
     end
 
     # On or off, like button 3. See `Goatbot.Explore`.
@@ -400,6 +406,25 @@ defmodule Goatbot.Robot do
         doc: "Lean error past which it gives up and waits to be stood back up"
       )
 
+      # In the air the wheels can't move the body, so the integral winds them
+      # up to the motors' 31 rad/s. On the floor the command stays near 11 at
+      # most. See `Goatbot.Balancer`.
+      param(:lift_command,
+        type: :float,
+        default: 25.0,
+        min: 5.0,
+        max: 31.4,
+        doc: "Wheel rad/s which, held for `lift_time`, means it has been picked up"
+      )
+
+      param(:lift_time,
+        type: :float,
+        default: 0.3,
+        min: 0.05,
+        max: 3.0,
+        doc: "Seconds above `lift_command` before it counts as lifted"
+      )
+
       # Tight on purpose. Any looser and the robot takes over while still moving
       # in the operator's hand, and then spends its life answering that
       # transient rather than balancing.
@@ -698,7 +723,9 @@ defmodule Goatbot.Robot do
        ki: param([:balance, :integral_gain]),
        kd: param([:balance, :derivative_gain]),
        integral_limit: param([:balance, :integral_limit]),
-       fall_angle: param([:balance, :fall_angle])},
+       fall_angle: param([:balance, :fall_angle]),
+       lift_command: param([:balance, :lift_command]),
+       lift_time: param([:balance, :lift_time])},
       # No hardware of its own (it only publishes to the wheels, which are
       # swapped for simulated ones), so it can run under SIMULATE too.
       simulation: :start
@@ -783,5 +810,6 @@ defmodule Goatbot.Robot do
   states do
     state(:balancing, doc: "Actively holding itself upright")
     state(:fallen, doc: "Past recovering, wheels braked, waiting to be stood back up")
+    state(:lifted, doc: "Picked up, wheels braked, waiting to be put down and stood back up")
   end
 end
