@@ -784,7 +784,8 @@ defmodule Goatbot.Robot do
     #    drive_release: param([:drive, :release])}
     # )
 
-    controller(:leds, {BB.NSK.Leds.Controller, brightness: 40})
+    # Every state breathes, fallen included; see `Goatbot.Leds`.
+    controller(:leds, {Goatbot.Leds, brightness: 40})
 
     # The e-paper panel shows a face rather than `BB.NSK.Display.Controller`'s
     # status screen. Runs without the panel too, drawing nowhere.
