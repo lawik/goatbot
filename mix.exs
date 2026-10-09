@@ -15,7 +15,8 @@ defmodule Goatbot.MixProject do
       listeners: listeners(Mix.target(), Mix.env()),
       start_permanent: Mix.env() == :prod,
       deps: deps(),
-      releases: [{@app, release()}]
+      releases: [{@app, release()}],
+      aliases: aliases()
     ]
   end
 
@@ -38,6 +39,17 @@ defmodule Goatbot.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      {:sourceror, "~> 1.7", runtime: false, only: [:dev, :test]},
+      {:lazy_html, ">= 0.1.0", only: :test},
+      {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},
+      {:esbuild, "~> 0.10", runtime: Mix.env() == :dev},
+      {:phoenix_html, "~> 4.1"},
+      {:phoenix_live_view, "~> 1.0"},
+      {:telemetry_poller, "~> 1.0"},
+      {:telemetry_metrics, "~> 1.0"},
+      {:bandit, "~> 1.5"},
+      {:phoenix, "~> 1.7"},
+      {:vintage_net_wifi, "~> 0.12", targets: [:trellis]},
       {:rustler, ">= 0.0.0", optional: true},
       {:circuits_i2c, "~> 2.1"},
       {:circuits_gpio, "~> 2.1"},
@@ -46,6 +58,8 @@ defmodule Goatbot.MixProject do
       {:nsk, github: "protolux-electronics/nsk", targets: :host, runtime: false},
       {:bb_nsk, "~> 0.1"},
       {:igniter, "~> 0.6", only: [:dev, :test]},
+      # Generator for the Phoenix that `mix bb_nsk.add_web` sets up.
+      {:phx_install, "~> 0.1", only: [:dev, :test], runtime: false},
       # Dependencies for all targets
       {:nerves, "~> 1.13", runtime: false},
       {:shoehorn, "~> 0.9.1"},
@@ -81,7 +95,16 @@ defmodule Goatbot.MixProject do
     ]
   end
 
-  # Uncomment the following line if using Phoenix > 1.8.
-  # defp listeners(:host, :dev), do: [Phoenix.CodeReloader]
+  defp listeners(:host, :dev), do: [Phoenix.CodeReloader]
   defp listeners(_, _), do: []
+
+  defp aliases() do
+    [
+      "assets.setup": ["esbuild.install --if-missing", "tailwind.install --if-missing"],
+      "assets.build": ["compile", "esbuild goatbot", "tailwind goatbot"],
+      "assets.deploy": ["esbuild goatbot --minify", "tailwind goatbot --minify", "phx.digest"],
+      setup: ["deps.get", "assets.setup", "assets.build"],
+      firmware: ["assets.deploy", "firmware"]
+    ]
+  end
 end

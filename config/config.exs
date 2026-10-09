@@ -4,6 +4,41 @@
 # This configuration file is loaded before any dependency and is restricted to
 # this project.
 import Config
+
+config :tailwind,
+  version: "4.1.12",
+  goatbot: [
+    args: ~w(
+    --input=assets/css/app.css
+    --output=priv/static/assets/css/app.css
+  ),
+    cd: Path.expand("..", __DIR__)
+  ]
+
+config :esbuild,
+  version: "0.25.4",
+  goatbot: [
+    args:
+      ~w(js/app.js --bundle --target=es2022 --outdir=../priv/static/assets/js --external:/fonts/* --external:/images/*),
+    cd: Path.expand("../assets", __DIR__),
+    env: %{"NODE_PATH" => [Path.expand("../deps", __DIR__), Mix.Project.build_path()]}
+  ]
+
+config :phoenix, json_library: Jason
+
+config :logger,
+  default_formatter: [format: "$time $metadata[$level] $message\n", metadata: [:request_id]]
+
+config :goatbot, GoatbotWeb.Endpoint,
+  url: [host: "localhost"],
+  adapter: Bandit.PhoenixAdapter,
+  render_errors: [
+    formats: [json: GoatbotWeb.ErrorJSON],
+    layout: false
+  ],
+  pubsub_server: Goatbot.PubSub,
+  live_view: [signing_salt: "lWkClIY5"]
+
 config :bb_nsk, name: "goatbot"
 
 # Breeze (the `Goatbot.Dashboard` TUI) sizes its render cache from :os_mon when
@@ -30,3 +65,5 @@ if Mix.target() == :host do
 else
   import_config "target.exs"
 end
+
+import_config "#{config_env()}.exs"

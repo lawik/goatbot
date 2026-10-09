@@ -6,5 +6,5 @@
     "rootfs_overlay/etc/iex.exs"
   ],
   plugins: [Breeze.HTMLFormatter],
-  import_deps: [:bb_parameter_store_cubdb, :bb, :bb_nsk, :breeze]
+  import_deps: [:bb_liveview, :phoenix, :bb_parameter_store_cubdb, :bb, :bb_nsk, :breeze]
 ]
