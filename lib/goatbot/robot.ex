@@ -691,6 +691,9 @@ defmodule Goatbot.Robot do
     # The e-paper panel shows a face rather than `BB.NSK.Display.Controller`'s
     # status screen. Runs without the panel too, drawing nowhere.
     controller(:face, Goatbot.Face, simulation: :start)
+
+    # Button 1 arms and disarms, button 2 stands.
+    controller(:buttons, Goatbot.ButtonController, simulation: :start)
   end
 
   states do
