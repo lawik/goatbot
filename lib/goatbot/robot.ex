@@ -30,6 +30,12 @@ defmodule Goatbot.Robot do
       allowed_states([:idle, :fallen])
     end
 
+    # On or off, like button 3. See `Goatbot.Explore`.
+    command :explore do
+      handler(Goatbot.Command.Explore)
+      allowed_states([:balancing])
+    end
+
     # From `:idle` as well as `:balancing`, because a robot armed while
     # already on its side has fallen over without ever having balanced.
     command :fall do
@@ -616,6 +622,71 @@ defmodule Goatbot.Robot do
         doc: "Wheel rad/s of differential per rad/s of requested turn"
       )
     end
+
+    # `Goatbot.Explore`, toggled with button 3. Names are unique across every
+    # group, hence the `explore_` prefixes.
+    group :explore do
+      # 0.5 of `drive_speed`'s 0.2 m/s: 10 cm/s. Brave, not aggressive.
+      param(:explore_throttle,
+        type: :float,
+        default: 0.5,
+        min: 0.1,
+        max: 1.0,
+        doc: "Fraction of full drive to explore at"
+      )
+
+      # The balance wobbles by a degree or so; a knock moves it by several.
+      # Lower it if it pushes against walls, raise it if it shies at nothing.
+      param(:bump_angle,
+        type: {:unit, :degree},
+        default: ~u(3 degree),
+        min: ~u(0.5 degree),
+        max: ~u(15 degree),
+        doc: "How far the lean must jump from its recent average to count as a bump"
+      )
+
+      param(:explore_backoff,
+        type: :float,
+        default: 1.2,
+        min: 0.2,
+        max: 5.0,
+        doc: "Seconds to reverse after a bump"
+      )
+
+      param(:explore_min_turn,
+        type: {:unit, :degree},
+        default: ~u(45 degree),
+        min: ~u(0 degree),
+        max: ~u(360 degree),
+        doc: "Smallest turn after backing off"
+      )
+
+      param(:explore_max_turn,
+        type: {:unit, :degree},
+        default: ~u(180 degree),
+        min: ~u(0 degree),
+        max: ~u(360 degree),
+        doc: "Largest turn after backing off"
+      )
+
+      # A third of the 10 cm/s it explores at. Pushing against something it
+      # can't get past, it barely moves without the lean ever jumping.
+      param(:stall_speed,
+        type: :float,
+        default: 0.03,
+        min: 0.0,
+        max: 0.2,
+        doc: "Speed, in m/s, below which a forward run counts as stuck"
+      )
+
+      param(:stall_time,
+        type: :float,
+        default: 1.5,
+        min: 0.2,
+        max: 10.0,
+        doc: "Seconds below `stall_speed` before it backs off and turns"
+      )
+    end
   end
 
   controllers do
@@ -692,7 +763,20 @@ defmodule Goatbot.Robot do
     # status screen. Runs without the panel too, drawing nowhere.
     controller(:face, Goatbot.Face, simulation: :start)
 
-    # Button 1 arms and disarms, button 2 stands.
+    controller(
+      :explorer,
+      {Goatbot.Explore,
+       throttle: param([:explore, :explore_throttle]),
+       bump_angle: param([:explore, :bump_angle]),
+       backoff: param([:explore, :explore_backoff]),
+       min_turn: param([:explore, :explore_min_turn]),
+       max_turn: param([:explore, :explore_max_turn]),
+       stall_speed: param([:explore, :stall_speed]),
+       stall_time: param([:explore, :stall_time])},
+      simulation: :start
+    )
+
+    # Button 1 arms and disarms, button 2 stands, button 3 explores.
     controller(:buttons, Goatbot.ButtonController, simulation: :start)
   end
 

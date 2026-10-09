@@ -12,6 +12,7 @@ defmodule Goatbot.Dashboard do
   | `a` | arm |
   | `s` | stand: hand the robot to the balancer (from idle or fallen) |
   | `d` | disarm |
+  | `e` | explore on / off (while balancing), see `Goatbot.Explore` |
   | `↑` / `↓` | hold to drive forward / back; let go to stop |
   | `←` / `→` | hold to turn left / right; let go to hold the new direction |
   | `p` | pause / resume the updates |
@@ -66,7 +67,7 @@ defmodule Goatbot.Dashboard do
   @drive_ms 50
   @first_press_ms 600
   @repeat_ms 150
-  @keys "a arm · s stand · d disarm · hold ↑↓ drive · hold ←→ turn · p pause · q quit"
+  @keys "a arm · s stand · d disarm · e explore · hold ↑↓ drive · hold ←→ turn · p pause · q quit"
 
   @doc "Runs the dashboard in the current terminal until `q` is pressed."
   def run, do: Breeze.Server.run(view: __MODULE__)
@@ -151,6 +152,7 @@ defmodule Goatbot.Dashboard do
   def handle_event(:input, %{"key" => "a"}, term), do: {:noreply, command(term, :arm)}
   def handle_event(:input, %{"key" => "s"}, term), do: {:noreply, command(term, :stand)}
   def handle_event(:input, %{"key" => "d"}, term), do: {:noreply, command(term, :disarm)}
+  def handle_event(:input, %{"key" => "e"}, term), do: {:noreply, command(term, :explore)}
   def handle_event(:input, %{"key" => "ArrowUp"}, term), do: {:noreply, press(term, :forward)}
   def handle_event(:input, %{"key" => "ArrowDown"}, term), do: {:noreply, press(term, :back)}
   def handle_event(:input, %{"key" => "ArrowLeft"}, term), do: {:noreply, press(term, :left)}
@@ -243,7 +245,7 @@ defmodule Goatbot.Dashboard do
       {"speed", if(v, do: "#{num(v.average * @wheel_radius * 100, 1)} cm/s", else: "-")},
       {"offset", if(v, do: deg(v.offset), else: "-")},
       {"heading", heading_text(y)},
-      {"drive", drive_text(held, v)}
+      {"drive", drive_text(held, v, snap.explore)}
     ])
   end
 
@@ -268,7 +270,8 @@ defmodule Goatbot.Dashboard do
       lean: nil,
       balancer: nil,
       velocity: nil,
-      yaw: nil
+      yaw: nil,
+      explore: nil
     }
 
     if running do
@@ -279,7 +282,8 @@ defmodule Goatbot.Dashboard do
           lean: safely(fn -> Map.get(BB.Robot.Runtime.configurations(@robot), :lean) end),
           balancer: safely(fn -> BB.Process.call(@robot, :pid_balancer, :inspect, 200) end),
           velocity: safely(fn -> BB.Process.call(@robot, :velocity_hold, :inspect, 200) end),
-          yaw: safely(fn -> BB.Process.call(@robot, :yaw_hold, :inspect, 200) end)
+          yaw: safely(fn -> BB.Process.call(@robot, :yaw_hold, :inspect, 200) end),
+          explore: safely(fn -> BB.Process.call(@robot, :explorer, :inspect, 200) end)
       }
     else
       base
@@ -371,11 +375,16 @@ defmodule Goatbot.Dashboard do
 
   defp now_ms, do: System.monotonic_time(:millisecond)
 
-  defp drive_text(nil, v), do: "— hold an arrow" <> speed_ref_text(v)
-  defp drive_text(:forward, v), do: "▲ forward" <> speed_ref_text(v)
-  defp drive_text(:back, v), do: "▼ back" <> speed_ref_text(v)
-  defp drive_text(:left, _v), do: "◀ turning left"
-  defp drive_text(:right, _v), do: "▶ turning right"
+  # Exploring drives through the same messages as the arrows, so it takes the
+  # same row.
+  defp drive_text(nil, v, %{phase: phase}) when phase != :off,
+    do: "◆ exploring: #{phase}" <> speed_ref_text(v)
+
+  defp drive_text(nil, v, _explore), do: "— hold an arrow" <> speed_ref_text(v)
+  defp drive_text(:forward, v, _explore), do: "▲ forward" <> speed_ref_text(v)
+  defp drive_text(:back, v, _explore), do: "▼ back" <> speed_ref_text(v)
+  defp drive_text(:left, _v, _explore), do: "◀ turning left"
+  defp drive_text(:right, _v, _explore), do: "▶ turning right"
 
   defp heading_text(nil), do: "-"
 
@@ -398,7 +407,9 @@ defmodule Goatbot.Dashboard do
   defp banner(%{state: :idle}), do: "ARMED · hold it upright and still, then s to balance"
   defp banner(%{state: :executing}), do: "running a command"
   defp banner(%{state: :disarming}), do: "disarming"
-  defp banner(%{state: :balancing}), do: "BALANCING · hold arrows to drive and turn · d disarm"
+
+  defp banner(%{state: :balancing}),
+    do: "BALANCING · hold arrows to drive and turn · e explore · d disarm"
 
   defp banner(%{state: :fallen}),
     do: "FALLEN · wheels braked · stand it up, hold it still, then s"

@@ -3,7 +3,7 @@ defmodule Goatbot.ButtonControllerTest do
 
   import Goatbot.ButtonController, only: [command: 3]
 
-  @buttons [arm_toggle: 1, stand: 2]
+  @buttons [arm_toggle: 1, stand: 2, explore: 3]
 
   test "the arm button toggles" do
     assert command(1, false, @buttons) == :arm
@@ -15,7 +15,7 @@ defmodule Goatbot.ButtonControllerTest do
     assert command(2, false, @buttons) == :stand
   end
 
-  test "the third button does nothing" do
-    assert command(3, true, @buttons) == nil
+  test "the third button explores" do
+    assert command(3, true, @buttons) == :explore
   end
 end
