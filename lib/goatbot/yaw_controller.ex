@@ -41,6 +41,13 @@ defmodule Goatbot.YawController do
   within `still_rate` of the current estimate), averaged over `bias_tau`, and
   integrates the corrected rate itself.
 
+  The estimate starts at zero, not at the first sample. A real bias is well
+  inside `still_rate` of zero, so it is learned within a few `bias_tau`; the
+  first sample after boot can be garbage while the IMU starts up (500°/s has
+  been seen), and taken as the bias it put every later sample outside
+  `still_rate` of it, so it could never be corrected. The robot then balanced
+  fine and drove in circles, fighting a turn that wasn't happening.
+
   What bias is left, and any that changes with temperature, is absorbed by
   letting `hold` follow the heading over `tau` seconds. That's slow enough to
   hold the direction for practical purposes while it balances, but it isn't a
@@ -109,7 +116,7 @@ defmodule Goatbot.YawController do
       %{
         robot: robot,
         mode: BB.Robot.Runtime.state(robot),
-        bias: nil,
+        bias: 0.0,
         raw_rate: 0.0,
         sample_at: nil,
         last: nil,
@@ -166,9 +173,6 @@ defmodule Goatbot.YawController do
 
   # Every gyro sample: integrate the heading while balancing, otherwise learn
   # the bias if nothing is turning the robot.
-  defp sample(%{bias: nil} = state, omega, at),
-    do: %{state | bias: omega, raw_rate: omega, sample_at: at}
-
   defp sample(state, omega, at) do
     dt = if state.sample_at, do: (at - state.sample_at) / 1_000_000_000, else: 0.0
     state = %{state | raw_rate: omega, sample_at: at}
@@ -204,7 +208,7 @@ defmodule Goatbot.YawController do
     hold =
       if state.tau > 0.0, do: hold + (state.heading - hold) * dt / (state.tau + dt), else: hold
 
-    rate = state.raw_rate - (state.bias || 0.0)
+    rate = state.raw_rate - state.bias
 
     # `Map.get` rather than `state.feedforward`, so this loads into a running
     # controller that was started before the option existed.
