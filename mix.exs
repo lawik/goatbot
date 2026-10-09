@@ -39,6 +39,14 @@ defmodule Goatbot.MixProject do
   # Run "mix help deps" to learn about dependencies.
   defp deps do
     [
+      # The e-paper panel. Target-only: emerge's native code doesn't build on
+      # macOS, and there is no panel on a laptop anyway.
+      {:video_interop, "~> 0.1.1", targets: @all_targets},
+      {:emerge, "== 0.4.0-beta.1", targets: @all_targets},
+      {:eink,
+       git: "https://github.com/emerge-elixir/eink.git",
+       branch: "feat/imperative-gray2",
+       targets: @all_targets},
       {:sourceror, "~> 1.7", runtime: false, only: [:dev, :test]},
       {:lazy_html, ">= 0.1.0", only: :test},
       {:tailwind, "~> 0.3", runtime: Mix.env() == :dev},

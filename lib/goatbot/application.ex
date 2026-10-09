@@ -58,7 +58,12 @@ defmodule Goatbot.Application do
         },
 
         # The Erlang node the badge drives the robot through, named for the wifi address.
-        Goatbot.Distribution
+        Goatbot.Distribution,
+
+        # The e-paper panel, its renderer and the sink between them. Ahead of
+        # the robot, so the panel is still there to be blanked when the robot's
+        # face controller shuts down.
+        BB.NSK.Display.Supervisor
       ]
     end
   end

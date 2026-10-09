@@ -687,6 +687,10 @@ defmodule Goatbot.Robot do
     # )
 
     controller(:leds, {BB.NSK.Leds.Controller, brightness: 40})
+
+    # The e-paper panel shows a face rather than `BB.NSK.Display.Controller`'s
+    # status screen. Runs without the panel too, drawing nowhere.
+    controller(:face, Goatbot.Face, simulation: :start)
   end
 
   states do

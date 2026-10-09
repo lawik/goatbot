@@ -94,6 +94,23 @@ config :mdns_lite,
     }
   ]
 
+# Emerge's minimal CPU raster build: no GPU on the board worth rendering
+# through, and an e-paper refresh dwarfs the cost of drawing.
+config :emerge, compiled_backends: [], compiled_vulkan_backends: []
+
+config :eink,
+  driver: EInk.Driver.UC8276,
+  width: 400,
+  height: 300,
+  palette: :bw,
+  driver_config: [
+    spi_device: "spidev0.0",
+    dc_pin: "EPD_DC",
+    reset_pin: "EPD_RESET",
+    busy_pin: "EPD_BUSY",
+    spi_opts: [speed_hz: 10_000_000]
+  ]
+
 # Import target specific config. This must remain at the bottom
 # of this file so it overrides the configuration defined above.
 # Uncomment to use target specific configurations
