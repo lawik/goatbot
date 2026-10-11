@@ -51,40 +51,16 @@ defmodule Goatbot.VelocityController do
   touched. In simulation it held 10 and 20 cm/s and stopped within about a
   second of letting go.
 
-  ## Trim: learning the balance point
+  ## What it doesn't do
 
-  On its own the damping leaves a steady crawl whenever the setpoint isn't the
-  true balance point: about 8.7 cm/s per degree of setpoint error at Kv 0.2, and
-  the true balance point moves with the battery, the floor and the load. Raising
+  It doesn't hold a position, so after a shove it stops wherever it ends up. The
+  flip side is that a setpoint that isn't the true balance point leaves a small
+  steady crawl: about 8.7 cm/s per degree of setpoint error at Kv 0.2. Raising
   `damping` shrinks the crawl, but the filtered command is the balance loop's own
   output, so `kp * damping` above about 1 starts feeding that output back into
   itself.
 
-  So a slow trim learns the missing lean from the crawl itself:
-
-      trim   -= trim_gain * average * dt     (only while standing still)
-      offset  = trim - damping * (average - speed_ref / wheel_radius)
-
-  That is an integral of velocity, which would be a position hold, except that
-  it only learns while nobody is driving and the robot is moving slower than
-  `trim_window`. A crawl is well under that and is trimmed out over
-  `damping / trim_gain` seconds; a shove is well over it for most of its travel,
-  so the robot doesn't walk back to where it was pushed from. The trim is kept,
-  within ±`trim_limit`, across falls and stands, since the balance point doesn't
-  change when the robot falls over.
-
-  It also waits `trim_holdoff` after standing up and after any throttle or turn.
-  The tail of a stop is a slow crawl too, and learning from it pulled the robot
-  back the way it came. And for a few seconds after a turn the lean reading is
-  off by up to a couple of degrees (it fades at the orientation filter's
-  1 / kp), so the crawl then isn't the balance point's doing.
-
-  ## What it doesn't do
-
-  It doesn't hold a position, so after a shove it stops wherever it ends up.
-
-  Everything else resets on each state transition, so each attempt starts at
-  rest.
+  Everything resets on each state transition, so each attempt starts at rest.
   """
 
   import BB.Unit
@@ -110,26 +86,6 @@ defmodule Goatbot.VelocityController do
         type: :float,
         default: 2.0,
         doc: "Average command, in rad/s, above which it stops integrating"
-      ],
-      trim_gain: [
-        type: :float,
-        default: 0.0,
-        doc: "Radians of trim learned per radian the wheels turn while standing still. 0 is off"
-      ],
-      trim_window: [
-        type: :float,
-        default: 3.0,
-        doc: "Average command, in rad/s, above which the trim stops learning"
-      ],
-      trim_holdoff: [
-        type: :non_neg_integer,
-        default: 5_000,
-        doc: "Milliseconds after standing up, driving or turning before the trim learns again"
-      ],
-      trim_limit: [
-        type: BB.Unit.Option.unit_type(compatible: :degree),
-        default: ~u(2 degree),
-        doc: "Largest trim it may learn"
       ],
       damping: [
         type: :float,
@@ -195,7 +151,7 @@ defmodule Goatbot.VelocityController do
     {:ok, _} = BB.PubSub.subscribe(robot, BB.NSK.Drive.path(), message_types: [Drive])
 
     state =
-      %{robot: robot, mode: BB.Robot.Runtime.state(robot), last: nil, trim: 0.0, overrides: %{}}
+      %{robot: robot, mode: BB.Robot.Runtime.state(robot), last: nil, overrides: %{}}
       |> Map.merge(fresh())
       |> configure(opts)
 
@@ -212,7 +168,6 @@ defmodule Goatbot.VelocityController do
       offset: 0.0,
       throttle: 0.0,
       throttle_at: nil,
-      quiet_since: System.monotonic_time(:nanosecond),
       target_speed: 0.0,
       speed_ref: 0.0
     }
@@ -240,15 +195,8 @@ defmodule Goatbot.VelocityController do
     {:noreply, %{state | sum: state.sum + velocity, count: state.count + 1}}
   end
 
-  def handle_info(
-        {:bb, _path, %Message{payload: %Drive{throttle: throttle, turn: turn}} = m},
-        state
-      ) do
-    quiet_since =
-      if throttle == 0.0 and turn == 0.0, do: state.quiet_since, else: m.monotonic_time
-
-    {:noreply,
-     %{state | throttle: throttle, throttle_at: m.monotonic_time, quiet_since: quiet_since}}
+  def handle_info({:bb, _path, %Message{payload: %Drive{throttle: throttle}} = m}, state) do
+    {:noreply, %{state | throttle: throttle, throttle_at: m.monotonic_time}}
   end
 
   # A hold or stop is the wheel at rest, which counts as a zero command.
@@ -261,10 +209,8 @@ defmodule Goatbot.VelocityController do
     now = System.monotonic_time(:nanosecond)
     dt = if state.last, do: (now - state.last) / 1_000_000_000, else: 0.0
 
-    settled? = now - state.quiet_since >= state.trim_holdoff * 1_000_000
-
     state = %{
-      tick(%{state | target_speed: target_speed(state, now)} |> Map.put(:settled?, settled?), dt)
+      tick(%{state | target_speed: target_speed(state, now)}, dt)
       | sum: 0.0,
         count: 0,
         last: now
@@ -310,32 +256,13 @@ defmodule Goatbot.VelocityController do
         do: min(state.speed_ref + step, state.target_speed),
         else: max(state.speed_ref - step, state.target_speed)
 
-    # Learn the balance point only from a slow crawl while nobody is driving,
-    # so a shove isn't undone.
-    trim =
-      if Map.get(state, :settled?, true) and state.target_speed == 0.0 and speed_ref == 0.0 and
-           abs(average) < state.trim_window,
-         do:
-           (state.trim - state.trim_gain * average * dt)
-           |> max(-state.trim_limit)
-           |> min(state.trim_limit),
-         else: state.trim
-
     # The filtered command is the wheel speed in rad/s; the reference is in m/s.
     offset =
-      (trim - state.gain * velocity -
-         state.damping * (average - speed_ref / state.wheel_radius))
+      (-state.gain * velocity - state.damping * (average - speed_ref / state.wheel_radius))
       |> max(-state.limit)
       |> min(state.limit)
 
-    %{
-      state
-      | average: average,
-        velocity: velocity,
-        offset: offset,
-        speed_ref: speed_ref,
-        trim: trim
-    }
+    %{state | average: average, velocity: velocity, offset: offset, speed_ref: speed_ref}
   end
 
   def tick(state, _dt), do: state
@@ -359,10 +286,6 @@ defmodule Goatbot.VelocityController do
       filter: Keyword.fetch!(opts, :filter),
       limit: Units.to_radians(Keyword.fetch!(opts, :limit)),
       ceiling: Keyword.fetch!(opts, :ceiling),
-      trim_gain: Keyword.fetch!(opts, :trim_gain),
-      trim_window: Keyword.fetch!(opts, :trim_window),
-      trim_holdoff: Keyword.fetch!(opts, :trim_holdoff),
-      trim_limit: Units.to_radians(Keyword.fetch!(opts, :trim_limit)),
       damping: Keyword.fetch!(opts, :damping),
       drive_speed: Keyword.fetch!(opts, :drive_speed),
       drive_accel: Keyword.fetch!(opts, :drive_accel),

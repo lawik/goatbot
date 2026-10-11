@@ -65,11 +65,7 @@ defmodule Goatbot.MixProject do
       # bumps to Nerves systems. Since these include Linux kernel and Erlang
       # version updates, please review their release notes in case
       # changes to your application are needed.
-      {:nerves_system_trellis,
-       github: "nerves-project/nerves_system_trellis",
-       ref: "jit",
-       runtime: false,
-       targets: :trellis}
+      {:nerves_system_trellis, "~> 0.5", runtime: false, targets: :trellis}
     ]
   end
 

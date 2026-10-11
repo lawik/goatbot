@@ -311,11 +311,11 @@ defmodule Goatbot.Robot do
     group :balance do
       # Not zero: the centre of mass sits ahead of the wheel axis, so the robot
       # is only in equilibrium leaning back far enough to bring it over them.
-      # -3.4 with the current battery, on carpet: -2.5 crawled. The velocity
-      # loop's trim learns whatever is left.
+      # -2.5 with the current battery: at -3 it ran away backwards, at -2
+      # forwards. The velocity loop takes up what's left.
       param(:setpoint,
         type: {:unit, :degree},
-        default: ~u(-3.4 degree),
+        default: ~u(-2.5 degree),
         min: ~u(-30 degree),
         max: ~u(30 degree),
         doc: "The lean the balance controller holds, negative leaning back"
@@ -332,12 +332,11 @@ defmodule Goatbot.Robot do
         doc: "Wheel velocity per radian of lean error, in 1/s"
       )
 
-      # 2.5 at a kp of 100: 1.5 held on tile but fell on carpet. The stock note
-      # still stands: much above 4 the derivative term amplifies gyro noise into
-      # the command.
+      # 1.5 at a kp of 100. The stock note still stands: much above 4 the
+      # derivative term amplifies gyro noise into the command.
       param(:derivative_gain,
         type: :float,
-        default: 2.5,
+        default: 1.5,
         min: 0.0,
         max: 20.0,
         doc: "Wheel velocity per radian per second of lean rate"
@@ -423,9 +422,7 @@ defmodule Goatbot.Robot do
       # Kv 0.2. Kv 0.3 (with a 0.1 s filter) braked harder in simulation, but
       # on the robot it shook itself over within half a second of standing up:
       # the filtered command is the balance loop's own output, so a stiffer,
-      # faster version of it feeds that output straight back in. With the 0.2 s
-      # filter Kv 0.3 drove and stopped a little tighter, but the shake grew
-      # slowly at rest and it fell over twice within a minute.
+      # faster version of it feeds that output straight back in.
       param(:velocity_damping,
         type: :float,
         default: 0.0043,
@@ -465,7 +462,7 @@ defmodule Goatbot.Robot do
       )
 
       # Driving: a held throttle sets a target speed the loop leans towards.
-      # 0.2 m/s, which drove well on the robot. Simulation
+      # 0.2 m/s at 0.2 m/s², which drove well on the robot. Simulation
       # reckoned 0.3 at 0.5 m/s² would be fine; on the robot it wasn't, so
       # treat the model as optimistic and step up from here with recordings.
       param(:drive_speed,
@@ -476,14 +473,11 @@ defmodule Goatbot.Robot do
         doc: "Target speed, in m/s, at full throttle"
       )
 
-      # 1.0 m/s² (and 2.0 back down): no longer what limits how quickly it gets
-      # going, which is now the velocity loop, and stops in about 1.5 s rather
-      # than coasting for 2.5.
       param(:drive_accel,
         type: :float,
-        default: 1.0,
+        default: 0.2,
         min: 0.05,
-        max: 3.0,
+        max: 1.0,
         doc: "How fast, in m/s², the target speed may change"
       )
 
@@ -492,7 +486,7 @@ defmodule Goatbot.Robot do
       # at 3 m/s²), which kicks the balance loop.
       param(:drive_decel,
         type: :float,
-        default: 2.0,
+        default: 1.0,
         min: 0.1,
         max: 10.0,
         doc: "How fast, in m/s², the target speed may fall back towards zero"
@@ -515,43 +509,6 @@ defmodule Goatbot.Robot do
         min: 0.1,
         max: 50.0,
         doc: "Average wheel command, in rad/s, above which it stops integrating"
-      )
-
-      # Learns the balance point from the crawl while standing still. 0.001
-      # trims out a crawl in about damping / 0.001 = 4 s. Only below the window
-      # (3 rad/s is 6.5 cm/s), so a shove isn't walked back.
-      param(:velocity_trim,
-        type: :float,
-        default: 0.001,
-        min: 0.0,
-        max: 0.01,
-        doc: "Radians of trim learned per radian the wheels turn while standing still"
-      )
-
-      param(:velocity_trim_window,
-        type: :float,
-        default: 3.0,
-        min: 0.1,
-        max: 20.0,
-        doc: "Average wheel command, in rad/s, above which the trim stops learning"
-      )
-
-      # The tail of a stop, and the few seconds after a turn when the lean
-      # reading is off, would otherwise be learned as the balance point.
-      param(:velocity_trim_holdoff,
-        type: :integer,
-        default: 5_000,
-        min: 0,
-        max: 30_000,
-        doc: "Milliseconds after standing up, driving or turning before the trim learns"
-      )
-
-      param(:velocity_trim_limit,
-        type: {:unit, :degree},
-        default: ~u(2 degree),
-        min: ~u(0 degree),
-        max: ~u(5 degree),
-        doc: "Largest trim it may learn"
       )
     end
 
@@ -683,10 +640,6 @@ defmodule Goatbot.Robot do
        filter: param([:velocity, :velocity_filter]),
        limit: param([:velocity, :velocity_limit]),
        ceiling: param([:velocity, :velocity_ceiling]),
-       trim_gain: param([:velocity, :velocity_trim]),
-       trim_window: param([:velocity, :velocity_trim_window]),
-       trim_holdoff: param([:velocity, :velocity_trim_holdoff]),
-       trim_limit: param([:velocity, :velocity_trim_limit]),
        damping: param([:velocity, :velocity_damping]),
        drive_speed: param([:velocity, :drive_speed]),
        drive_accel: param([:velocity, :drive_accel]),
