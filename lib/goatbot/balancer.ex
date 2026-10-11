@@ -22,6 +22,23 @@ defmodule Goatbot.Balancer do
   a command held above `lift_command` for `lift_time` seconds means the robot
   is in the air: it brakes the wheels and runs `Goatbot.Robot.lift/0`.
 
+  ## Catching
+
+  Fallen or lifted, it watches for someone holding it upright: the lean within
+  `catch_angle` of the setpoint and moving slower than `catch_rate`, for
+  `catch_time` seconds. Then it runs `Goatbot.Robot.stand/0` and takes over.
+
+  Both are averaged over `catch_filter` seconds first. A hand trembles, and
+  judged sample by sample one shaky reading restarted the count, so a perfectly
+  good hold never got there. Averaged, a tremble washes out while a real swing
+  or tilt still shows.
+
+  Held upright in the air is upright and still too, so a robot held up off the
+  floor would be caught, spin up, be lifted again, and round it goes. So a lift
+  within `relift_window` seconds of a catch doubles the hold the next catch
+  needs, up to `max_backoff` times, and one that isn't resets it. Putting it
+  down on the floor is what breaks the loop.
+
   ## Why the integral is large
 
   The wheels behave like a speed servo: torque goes with the command minus the
@@ -86,6 +103,36 @@ defmodule Goatbot.Balancer do
         default: 0.3,
         doc: "Seconds above `lift_command` before it counts as lifted"
       ],
+      catch_angle: [
+        type: BB.Unit.Option.unit_type(compatible: :degree),
+        required: true,
+        doc: "Lean error within which, held still, it takes over again"
+      ],
+      catch_rate: [
+        type: BB.Unit.Option.unit_type(compatible: :degree_per_second),
+        required: true,
+        doc: "How still it must be held before taking over, so it can't grab mid-air"
+      ],
+      catch_time: [
+        type: :float,
+        default: 0.5,
+        doc: "Seconds it must be held upright and still before it takes over"
+      ],
+      catch_filter: [
+        type: :float,
+        default: 0.25,
+        doc: "Seconds the lean and lean rate are averaged over before judging a hold"
+      ],
+      relift_window: [
+        type: :float,
+        default: 3.0,
+        doc: "Seconds after a catch in which a lift means it was caught in the air"
+      ],
+      max_backoff: [
+        type: :pos_integer,
+        default: 8,
+        doc: "Most the catch hold may be multiplied by after repeated lifts"
+      ],
       max_wheel_speed: [
         type: :float,
         default: 31.4,
@@ -136,7 +183,13 @@ defmodule Goatbot.Balancer do
       differential: 0.0,
       differential_at: nil,
       target: nil,
-      over_since: nil
+      over_since: nil,
+      held_since: nil,
+      held_lean: nil,
+      held_rate: 0.0,
+      held_at: nil,
+      caught_at: nil,
+      backoff: 1
     }
 
     {:ok, configure(opts, state)}
@@ -166,7 +219,11 @@ defmodule Goatbot.Balancer do
          differential: 0.0,
          differential_at: nil,
          target: nil,
-         over_since: nil
+         over_since: nil,
+         held_since: nil,
+         held_lean: nil,
+         held_rate: 0.0,
+         held_at: nil
      }}
   end
 
@@ -183,6 +240,14 @@ defmodule Goatbot.Balancer do
         %{mode: :balancing} = state
       ) do
     {:noreply, step(state, lean, rate, msg.monotonic_time)}
+  end
+
+  def handle_info(
+        {:bb, _path, %Message{payload: %JointState{positions: [lean], velocities: [rate]}} = msg},
+        %{mode: mode} = state
+      )
+      when mode in [:fallen, :lifted] do
+    {:noreply, watch_for_catch(state, lean, rate, msg.monotonic_time)}
   end
 
   def handle_info(_message, state), do: {:noreply, state}
@@ -256,7 +321,64 @@ defmodule Goatbot.Balancer do
 
     # Locally, as in `fall/1`, so samples arriving before the transition comes
     # back don't spin the wheels up again.
-    %{state | mode: :lifted, last: nil, over_since: nil}
+    %{state | mode: :lifted, last: nil, over_since: nil, backoff: backoff_after_lift(state)}
+  end
+
+  # Lifted again soon after a catch: it was caught in the air, so make the next
+  # catch wait longer.
+  defp backoff_after_lift(%{caught_at: nil}), do: 1
+
+  defp backoff_after_lift(state) do
+    since_catch = (System.monotonic_time(:nanosecond) - state.caught_at) / 1_000_000_000
+
+    if since_catch < state.relift_window,
+      do: min(state.backoff * 2, state.max_backoff),
+      else: 1
+  end
+
+  @doc """
+  Whether a lean and lean rate count as being held upright and still. Pure, so
+  it can be tested without a robot.
+  """
+  @spec held_upright?(map, float, float) :: boolean
+  def held_upright?(state, lean, rate),
+    do: abs(lean - state.setpoint) <= state.catch_angle and abs(rate) <= state.catch_rate
+
+  defp watch_for_catch(state, lean, rate, now) do
+    state = smooth_hold(state, lean, rate, now)
+
+    cond do
+      not held_upright?(state, state.held_lean, state.held_rate) ->
+        %{state | held_since: nil}
+
+      is_nil(state.held_since) ->
+        %{state | held_since: now}
+
+      now - state.held_since >= state.catch_time * state.backoff * 1_000_000_000 ->
+        state.robot.stand()
+        # The transition coming back resets the rest; until then, don't ask again.
+        %{state | held_since: nil, caught_at: now}
+
+      true ->
+        state
+    end
+  end
+
+  # The lean and lean rate averaged over `catch_filter`, starting from the first
+  # sample so the average doesn't have to climb up from zero.
+  defp smooth_hold(%{held_lean: nil} = state, lean, rate, now),
+    do: %{state | held_lean: lean, held_rate: rate, held_at: now}
+
+  defp smooth_hold(state, lean, rate, now) do
+    dt = (now - state.held_at) / 1_000_000_000
+    k = dt / (state.catch_filter + dt)
+
+    %{
+      state
+      | held_lean: state.held_lean + (lean - state.held_lean) * k,
+        held_rate: state.held_rate + (rate - state.held_rate) * k,
+        held_at: now
+    }
   end
 
   defp fall(state) do
@@ -281,6 +403,12 @@ defmodule Goatbot.Balancer do
       max_wheel_speed: Keyword.fetch!(opts, :max_wheel_speed),
       lift_command: Keyword.fetch!(opts, :lift_command),
       lift_time: Keyword.fetch!(opts, :lift_time),
+      catch_angle: Units.to_radians(Keyword.fetch!(opts, :catch_angle)),
+      catch_rate: Units.to_radians_per_second(Keyword.fetch!(opts, :catch_rate)),
+      catch_time: Keyword.fetch!(opts, :catch_time),
+      catch_filter: Keyword.fetch!(opts, :catch_filter),
+      relift_window: Keyword.fetch!(opts, :relift_window),
+      max_backoff: Keyword.fetch!(opts, :max_backoff),
       left_wheel: Keyword.fetch!(opts, :left_wheel),
       right_wheel: Keyword.fetch!(opts, :right_wheel)
     })

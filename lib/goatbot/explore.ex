@@ -4,8 +4,9 @@ defmodule Goatbot.Explore do
   then back off, turn a random amount and carry on.
 
   Toggled with `toggle/1` (button 3, via `Goatbot.ButtonController`), and only
-  while balancing. Falling or disarming switches it off, so a robot stood back
-  up doesn't drive off on its own.
+  while balancing. Falling over or being picked up pauses it, and it carries on
+  once the robot is balancing again, whether it was stood up by hand or caught
+  by `Goatbot.Balancer`. Disarming switches it off.
 
   It drives the same way a pilot does, with `BB.NSK.Drive.command/3` at 20 Hz,
   so speed, ramps and the dead-man timeout all stay with
@@ -183,14 +184,7 @@ defmodule Goatbot.Explore do
 
   @impl BB.Controller
   def handle_info({:bb, [:state_machine], %Message{payload: %Transition{to: to}}}, state) do
-    state = %{state | mode: to}
-
-    if to != :balancing and state.phase != :off do
-      Logger.info("Explore: off, the robot is #{to}")
-      {:noreply, stop(state)}
-    else
-      {:noreply, state}
-    end
+    {:noreply, transition(%{state | mode: to}, state.phase, to)}
   end
 
   # The heading sensor's twist and the lean sensor's plain rate tell the two apart.
@@ -214,7 +208,8 @@ defmodule Goatbot.Explore do
     {:noreply, %{state | count: state.count + 1}}
   end
 
-  def handle_info(:tick, %{phase: :off} = state), do: {:noreply, state}
+  def handle_info(:tick, %{phase: phase} = state) when phase in [:off, :paused],
+    do: {:noreply, state}
 
   def handle_info(:tick, state) do
     Process.send_after(self(), :tick, div(1000, state.rate))
@@ -310,6 +305,31 @@ defmodule Goatbot.Explore do
 
   defp track_slow(%{slow_since: nil} = state, now), do: %{state | slow_since: now}
   defp track_slow(state, _now), do: state
+
+  # Back on its wheels: carry on from a fresh forward run.
+  defp transition(state, :paused, :balancing) do
+    Logger.info("Explore: resuming")
+    send(self(), :tick)
+    enter(state, :forward, now())
+  end
+
+  # Fell over or was picked up: hold on, and carry on when it's balancing again.
+  defp transition(state, phase, to)
+       when phase not in [:off, :paused] and to in [:fallen, :lifted] do
+    Logger.info("Explore: paused, the robot is #{to}")
+    BB.NSK.Drive.stop(state.robot)
+    %{state | phase: :paused, last: nil}
+  end
+
+  # A command running in the meantime, such as the stand that ends a pause.
+  defp transition(state, _phase, :executing), do: state
+
+  defp transition(state, phase, to) when phase != :off and to != :balancing do
+    Logger.info("Explore: off, the robot is #{to}")
+    stop(state)
+  end
+
+  defp transition(state, _phase, _to), do: state
 
   defp stop(state) do
     BB.NSK.Drive.stop(state.robot)

@@ -428,20 +428,34 @@ defmodule Goatbot.Robot do
       # Tight on purpose. Any looser and the robot takes over while still moving
       # in the operator's hand, and then spends its life answering that
       # transient rather than balancing.
+      # It recovers from a sloppy hand-held angle, so the window is wide: 10°,
+      # found by hand. The stock 2° wanted a precision nobody holds a robot with.
       param(:catch_angle,
         type: {:unit, :degree},
-        default: ~u(2 degree),
+        default: ~u(10 degree),
         min: ~u(1 degree),
         max: ~u(30 degree),
         doc: "Lean error within which it will take over again"
       )
 
+      # Of the lean rate averaged over a quarter second. A hand trembles well
+      # past the stock 4°/s; a swing through upright is far faster than 20.
       param(:catch_rate,
         type: {:unit, :degree_per_second},
-        default: ~u(4 degree_per_second),
+        default: ~u(20 degree_per_second),
         min: ~u(1 degree_per_second),
         max: ~u(200 degree_per_second),
         doc: "How still it must be held before taking over, so it can't grab mid-air"
+      )
+
+      # Long enough that it isn't snatched mid-swing, short enough that it
+      # doesn't feel like waiting.
+      param(:catch_time,
+        type: :float,
+        default: 0.5,
+        min: 0.1,
+        max: 5.0,
+        doc: "Seconds it must be held upright and still before it takes over"
       )
     end
 
@@ -725,7 +739,10 @@ defmodule Goatbot.Robot do
        integral_limit: param([:balance, :integral_limit]),
        fall_angle: param([:balance, :fall_angle]),
        lift_command: param([:balance, :lift_command]),
-       lift_time: param([:balance, :lift_time])},
+       lift_time: param([:balance, :lift_time]),
+       catch_angle: param([:balance, :catch_angle]),
+       catch_rate: param([:balance, :catch_rate]),
+       catch_time: param([:balance, :catch_time])},
       # No hardware of its own (it only publishes to the wheels, which are
       # swapped for simulated ones), so it can run under SIMULATE too.
       simulation: :start
