@@ -116,3 +116,18 @@ config :eink,
 # Uncomment to use target specific configurations
 
 # import_config "#{Mix.target()}.exs"
+
+# NervesHub, with the product's shared secret taken from the environment at
+# build time so it stays out of the repo:
+#
+#     NH_PRODUCT_KEY=nhp_... NH_PRODUCT_SECRET=... mix firmware
+#
+# Without them the firmware still builds, and NervesHubLink logs that it has
+# no credentials instead of connecting.
+config :nerves_hub_link,
+  host: "devices.nervescloud.com",
+  remote_iex: true,
+  shared_secret: [
+    product_key: System.get_env("NH_PRODUCT_KEY"),
+    product_secret: System.get_env("NH_PRODUCT_SECRET")
+  ]

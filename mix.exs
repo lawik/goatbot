@@ -75,6 +75,8 @@ defmodule Goatbot.MixProject do
       {:ring_logger, "~> 0.11.0"},
       {:toolshed, "~> 0.5.0"},
       {:breeze, "~> 0.5.1"},
+      # Fleet management, remote IEx console and updates from NervesHub.
+      {:nerves_hub_link, "~> 2.12", targets: @all_targets},
 
       # Allow Nerves.Runtime on host to support development, testing and CI.
       # See config/host.exs for usage.
