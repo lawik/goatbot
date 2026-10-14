@@ -7,6 +7,8 @@ defmodule Goatbot.Application do
 
   @impl true
   def start(_type, _args) do
+    calm_status_led()
+
     # Hardware links come up before the robot, so its components find them.
     # The endpoint comes last: children stop in reverse order, so the robot is
     # disarmed before the dashboard watching it goes away.
@@ -69,6 +71,27 @@ defmodule Goatbot.Application do
   end
 
   require Logger
+
+  # The board's red status LED (PD4) comes up on the kernel's `heartbeat`
+  # trigger, which beats faster the busier the board is, and the balance loop
+  # keeps it busy: frantic. A brief blink every three seconds still says the
+  # board is alive, at a pace that doesn't change with load. The NeoPixels are
+  # `rgb:indicator-*` and `Goatbot.Leds`'s, so this leaves them alone.
+  @status_leds "/sys/class/leds/*:status"
+  @blink_on_ms 60
+  @blink_off_ms 2_940
+
+  defp calm_status_led do
+    for led <- Path.wildcard(@status_leds) do
+      with :ok <- File.write(Path.join(led, "trigger"), "timer"),
+           :ok <- File.write(Path.join(led, "delay_on"), Integer.to_string(@blink_on_ms)),
+           :ok <- File.write(Path.join(led, "delay_off"), Integer.to_string(@blink_off_ms)) do
+        :ok
+      else
+        {:error, reason} -> Logger.warning("Could not calm #{led}: #{inspect(reason)}")
+      end
+    end
+  end
 
   @doc false
   # Battery telemetry is a nice-to-have: if the UART won't open, log it and
